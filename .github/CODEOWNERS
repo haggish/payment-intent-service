@@ -1,0 +1,9 @@
+# Default owner for everything in the repo
+* @yourname
+
+# Domain code is core; require an extra eye for changes
+/app/src/main/java/com/example/payments/domain/ @yourname
+
+# Infrastructure changes carry security and cost implications
+/infrastructure/ @yourname
+/.github/ @yourname

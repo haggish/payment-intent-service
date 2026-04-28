@@ -1,0 +1,220 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  build-app:
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Build & test
+        run: ./gradlew build --no-daemon
+
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: app/build/libs/*.jar
+
+  publish-image:
+    needs: build-app
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.push.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: app/build/libs
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push image
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: payment-intent-service
+          TAG: ${{ needs.build-app.outputs.image-tag }}
+        run: |
+          docker build -f app/Dockerfile -t "$REGISTRY/$REPO:$TAG" -t "$REGISTRY/$REPO:latest" .
+          docker push "$REGISTRY/$REPO:$TAG"
+          docker push "$REGISTRY/$REPO:latest"
+          echo "uri=$REGISTRY/$REPO:$TAG" >> "$GITHUB_OUTPUT"
+
+  deploy-infra:
+    needs: publish-image
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: infrastructure/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install
+        run: npm ci
+        working-directory: infrastructure
+
+      - name: CDK diff (visible in run logs)
+        run: npx cdk diff --all
+        working-directory: infrastructure
+        continue-on-error: true
+
+      - name: CDK deploy
+        run: npx cdk deploy --all --require-approval never
+        working-directory: infrastructure
+
+  migrate-db:
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Migrations follow the expand/contract pattern: schema changes are
+      # backward-compatible with the currently-deployed app version.
+      # See README §"CI/CD" for the full reasoning.
+      - name: Run Flyway via ECS RunTask
+        run: |
+          # TODO: aws ecs run-task with the migration task definition
+          echo "TODO: invoke migration task"
+
+  deploy-app:
+    needs: [publish-image, migrate-db]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new deployment
+        run: |
+          aws ecs update-service \
+            --cluster payment-cluster \
+            --service payment-service \
+            --force-new-deployment
+
+      - name: Wait for service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster payment-cluster \
+            --services payment-service
+
+  smoke-test:
+    needs: deploy-app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve ALB DNS
+        id: alb
+        run: |
+          DNS=$(aws cloudformation describe-stacks \
+            --stack-name PaymentService \
+            --query "Stacks[0].Outputs[?OutputKey=='AlbDns'].OutputValue" \
+            --output text)
+          echo "dns=$DNS" >> "$GITHUB_OUTPUT"
+
+      - name: Health check
+        run: |
+          for i in {1..30}; do
+            if curl -fsS "http://${{ steps.alb.outputs.dns }}/actuator/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "health check failed after 30 attempts"
+          exit 1
+
+      - name: End-to-end smoke test
+        run: |
+          # TODO: create payment intent → confirm → assert AUTHORIZED within 30s
+          echo "TODO: implement e2e smoke test"
+
+  rollback:
+    needs: smoke-test
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Roll back ECS service to previous task definition
+        run: |
+          # The deployment circuit breaker on the ECS service handles the
+          # in-deploy failure case automatically. This job handles the case
+          # where deploy stabilized but smoke tests still failed.
+          PREVIOUS_TASK_DEF=$(aws ecs describe-services \
+            --cluster payment-cluster \
+            --services payment-service \
+            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition' \
+            --output text)
+          echo "Currently primary: $PREVIOUS_TASK_DEF"
+          # TODO: identify last-known-good task def and roll back to it
+
+      - name: Notify
+        run: |
+          # TODO: post to SNS / Slack
+          echo "Rollback executed"

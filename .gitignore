@@ -1,0 +1,64 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+*.gradle.lockfile
+gradle-app.setting
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
+.project
+.classpath
+.settings/
+.factorypath
+.metadata/
+bin/
+!infrastructure/bin/
+
+# Node / CDK
+node_modules/
+cdk.out/
+cdk.staging/
+cdk.context.json
+*.js
+*.js.map
+*.d.ts
+*.tsbuildinfo
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Test reports
+test-output/
+*.log
+logs/
+
+# Spring
+application-local.yml
+application-dev.yml

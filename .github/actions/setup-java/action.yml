@@ -1,0 +1,12 @@
+name: 'Set up Java + Gradle'
+description: 'Sets up JDK 21, Gradle, and dependency caching consistently across workflows'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
+
+    - uses: gradle/actions/setup-gradle@v3
