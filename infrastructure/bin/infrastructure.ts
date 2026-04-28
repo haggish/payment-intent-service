@@ -15,6 +15,4 @@ const network = new NetworkStack(app, 'PaymentNetwork', { env });
 new PaymentServiceStack(app, 'PaymentService', {
   env,
   vpc: network.vpc,
-  appSecurityGroup: network.appSecurityGroup,
-  dbSecurityGroup: network.dbSecurityGroup,
 });

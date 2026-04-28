@@ -13,9 +13,9 @@ When adding code, check whether the surrounding file is a stub. New work should 
 Two top-level builds:
 
 - `app/` — Spring Boot 3 / Java 21 service, built with Gradle (`settings.gradle` includes only `app`).
-- `infrastructure/` — AWS CDK in TypeScript, separate npm project. Two stacks: `NetworkStack` (stable: VPC, SGs) and `PaymentServiceStack` (changes per deploy: Aurora, Fargate, SQS, observability).
+- `infrastructure/` — AWS CDK in TypeScript, separate npm project. Two stacks: `NetworkStack` (stable: VPC only) and `PaymentServiceStack` (everything else: SGs, Aurora, Fargate, SQS, observability).
 
-The split between the two stacks is intentional — keep network resources stable and put per-deploy resources in `PaymentServiceStack`.
+The split between the two stacks is intentional — keep network resources stable and put per-deploy resources in `PaymentServiceStack`. Security groups live in `PaymentServiceStack` rather than `NetworkStack` so SG-to-SG rules (ALB → app, app → DB) stay intra-stack; otherwise the auto-wired ALB→app ingress would form a dependency cycle with the network stack.
 
 ## Common commands
 
@@ -76,7 +76,11 @@ The service is out of PCI scope by design — `PaymentMethod` is a token referen
 
 CDK unit tests (`infrastructure/test/`) treat security/reliability properties as code-reviewable assertions: Aurora `storageEncrypted: true`, DB SG ingress only from app SG, every Lambda has a log retention policy, every queue has a redrive policy, every SNS topic enforces TLS. New constructs should preserve these invariants — failing tests indicate a real regression, not a test to update.
 
-`PaymentServiceStack` runs Aurora Serverless v2 with `serverlessV2MinCapacity: 0` (scale-to-zero) and `removalPolicy: DESTROY` for clean teardown — production would enable deletion protection. There is deliberately **no NAT Gateway** for cost reasons; Fargate runs with a public IP for outbound. If adding networking, see the README "What's deliberately not implemented" section before changing this.
+Jest is configured in `infrastructure/jest.config.js` with `ts-jest` and a `testPathIgnorePatterns` for `cdk.out/` — without that exclude, jest discovers test files inside Docker asset stagings and tries to run them.
+
+`PaymentServiceStack` runs Aurora Serverless v2 with `serverlessV2MinCapacity: 0` (scale-to-zero) and `removalPolicy: DESTROY` for clean teardown — production would enable deletion protection. Aurora Serverless v2 scale-to-zero requires a recent `aws-cdk-lib` (added after the November 2024 AWS announcement); pre-2.171-ish versions reject `min: 0` with a "must be >= 0.5" validation error. There is deliberately **no NAT Gateway** for cost reasons; Fargate runs with a public IP for outbound. If adding networking, see the README "What's deliberately not implemented" section before changing this.
+
+The `DockerImageAsset` for the Fargate image uses the **repo root** as build context (so the Dockerfile can see both `gradlew` and `app/`). A root `.dockerignore` is therefore load-bearing: without it, `infrastructure/cdk.out/` gets staged into itself recursively until paths blow up with `ENAMETOOLONG`. If you change the build context or add new directories at the repo root, update `.dockerignore` accordingly.
 
 ## CI/CD
 

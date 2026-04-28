@@ -11,8 +11,6 @@ describe('PaymentServiceStack invariants', () => {
     const network = new NetworkStack(app, 'TestNetwork');
     const stack = new PaymentServiceStack(app, 'TestService', {
       vpc: network.vpc,
-      appSecurityGroup: network.appSecurityGroup,
-      dbSecurityGroup: network.dbSecurityGroup,
     });
     template = Template.fromStack(stack);
   });

@@ -11,8 +11,6 @@ import { Construct } from 'constructs';
  */
 export class NetworkStack extends cdk.Stack {
   readonly vpc: ec2.Vpc;
-  readonly appSecurityGroup: ec2.SecurityGroup;
-  readonly dbSecurityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -33,24 +31,5 @@ export class NetworkStack extends cdk.Stack {
         },
       ],
     });
-
-    this.appSecurityGroup = new ec2.SecurityGroup(this, 'AppSg', {
-      vpc: this.vpc,
-      description: 'Security group for the Fargate app tasks',
-      allowAllOutbound: true,
-    });
-
-    this.dbSecurityGroup = new ec2.SecurityGroup(this, 'DbSg', {
-      vpc: this.vpc,
-      description: 'Security group for the Aurora cluster',
-      allowAllOutbound: false,
-    });
-
-    // App SG can reach DB on Postgres port; nothing else can
-    this.dbSecurityGroup.addIngressRule(
-      this.appSecurityGroup,
-      ec2.Port.tcp(5432),
-      'Postgres from app tasks',
-    );
   }
 }

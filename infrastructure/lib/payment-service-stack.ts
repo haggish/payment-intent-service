@@ -14,13 +14,28 @@ import { buildAlarms } from './observability/alarms';
 
 interface PaymentServiceStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
-  appSecurityGroup: ec2.ISecurityGroup;
-  dbSecurityGroup: ec2.ISecurityGroup;
 }
 
 export class PaymentServiceStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: PaymentServiceStackProps) {
     super(scope, id, props);
+
+    // ---------- Security groups ----------
+    // Owned by this stack so SG-to-SG rules (ALB → app, app → DB) stay intra-stack
+    // and don't form a cycle with the network stack.
+    const appSg = new ec2.SecurityGroup(this, 'AppSg', {
+      vpc: props.vpc,
+      description: 'Security group for the Fargate app tasks',
+      allowAllOutbound: true,
+    });
+
+    const dbSg = new ec2.SecurityGroup(this, 'DbSg', {
+      vpc: props.vpc,
+      description: 'Security group for the Aurora cluster',
+      allowAllOutbound: false,
+    });
+
+    dbSg.addIngressRule(appSg, ec2.Port.tcp(5432), 'Postgres from app tasks');
 
     // ---------- Database ----------
     const dbCluster = new rds.DatabaseCluster(this, 'Aurora', {
@@ -35,7 +50,7 @@ export class PaymentServiceStack extends cdk.Stack {
       serverlessV2MaxCapacity: 1,
       vpc: props.vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      securityGroups: [props.dbSecurityGroup as ec2.SecurityGroup],
+      securityGroups: [dbSg],
       credentials: rds.Credentials.fromGeneratedSecret('payments_admin'),
       defaultDatabaseName: 'payments',
       storageEncrypted: true,
@@ -92,12 +107,12 @@ export class PaymentServiceStack extends cdk.Stack {
         }),
       },
       circuitBreaker: { rollback: true },
-      securityGroups: [props.appSecurityGroup as ec2.SecurityGroup],
+      securityGroups: [appSg],
       assignPublicIp: true, // no NAT; tasks reach AWS APIs via public IPs
     });
 
     eventsQueue.grantSendMessages(fargate.taskDefinition.taskRole);
-    dbCluster.connections.allowDefaultPortFrom(props.appSecurityGroup);
+    dbCluster.connections.allowDefaultPortFrom(appSg);
 
     // ---------- Alarm topics ----------
     const pagingTopic = new sns.Topic(this, 'PagingTopic', {
