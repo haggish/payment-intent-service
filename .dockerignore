@@ -1,0 +1,22 @@
+# Infrastructure / CDK (not part of the app image)
+infrastructure/cdk.out/
+infrastructure/cdk.staging/
+infrastructure/node_modules/
+infrastructure/test/
+infrastructure/coverage/
+
+# Gradle / Java build artifacts (rebuilt inside the image)
+.gradle/
+build/
+app/build/
+app/.gradle/
+
+# Git / IDE
+.git/
+.idea/
+.vscode/
+*.iml
+
+# Misc
+.DS_Store
+*.log
