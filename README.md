@@ -14,45 +14,30 @@ If the service is processing a payment when the host crashes, no payment is sile
 
 ## Architecture at a glance
 
-```
-┌────────────┐    HTTPS    ┌──────────────┐
-│   Client   ├────────────▶│     ALB      │
-└────────────┘              └──────┬───────┘
-                                   │
-                            ┌──────▼───────┐
-                            │   Fargate    │
-                            │ Spring Boot  │
-                            └──┬─────┬──┬──┘
-                JDBC + HikariCP│     │  │ Outbox relay
-                               │     │  └──────────────┐
-                            ┌──▼─────▼─┐               │
-                            │  Aurora  │       SQS FIFO│
-                            │ Postgres │               │
-                            │ (Serverless v2)          │
-                            └──────────┘               │
-                                                ┌──────▼─────┐
-                                                │   Lambda   │
-                                                │  Consumer  │
-                                                └──────┬─────┘
-                                                       │ DLQ on terminal failure
-                                                       ▼
-                                                ┌────────────┐
-                                                │    DLQ     │
-                                                └────────────┘
+```mermaid
+flowchart LR
+    Client -->|HTTPS| ALB
+    ALB --> Fargate
+    Fargate -->|"JDBC<br/>(Hikari)"| Aurora["Aurora Postgres<br/>(Serverless v2)"]
+    Fargate -.->|"@Scheduled<br/>outbox dispatcher"| SQS["SQS FIFO"]
+    SQS -->|"poll"| Fargate
+    SQS -->|"3 receives"| DLQ["SQS DLQ"]
+    Fargate -.->|"@Scheduled<br/>reconciliation"| Processor["Payment processor<br/>(stub)"]
+    Fargate --> Processor
 ```
 
-Two CDK stacks: `NetworkStack` (VPC, subnets, security groups) and `PaymentServiceStack` (database, compute, queues, observability). Compute is a single Fargate task running the Spring Boot service; an embedded `@Scheduled` outbox dispatcher publishes events to SQS FIFO; a Lambda consumer processes them and calls the (stubbed) payment processor.
+Three CDK stacks: `PaymentBootstrap` (one-time GitHub OIDC + IAM roles), `NetworkStack` (VPC), `PaymentServiceStack` (database, compute, queues, observability). Compute is a single Fargate task running the Spring Boot service. An embedded `@Scheduled` outbox dispatcher publishes events to SQS FIFO; a polling consumer in the same JVM (`PaymentEventListener`) reads them back, deduplicates via `processed_events`, and calls the (stubbed) payment processor. A separate `@Scheduled` reconciliation job recovers intents stuck in `PROCESSING` after `Unknown` outcomes.
 
 ## Tech stack
 
 - **Application**: Java 21, Spring Boot 3, Spring Web, Spring Data JDBC, Flyway, Resilience4j, Micrometer
 - **Database**: Aurora Serverless v2 PostgreSQL with scale-to-zero
 - **Messaging**: SQS FIFO, SQS DLQ, custom outbox pattern
-- **Compute**: ECS Fargate behind ALB; Lambda for SQS consumption
+- **Compute**: ECS Fargate behind ALB; consumer runs in the same JVM via a polling adapter (Lambda would be a drop-in alternative)
 - **Infrastructure**: AWS CDK (TypeScript)
 - **CI/CD**: GitHub Actions with OIDC federation
-- **Observability**: CloudWatch dashboards, alarms, and Logs Insights; AWS X-Ray
-- **Local development**: Testcontainers Postgres, LocalStack for AWS service emulation
+- **Observability**: CloudWatch dashboards, alarms, and Logs Insights; Micrometer with the OpenTelemetry tracing bridge ready (no exporter wired today)
+- **Local development**: Postgres + LocalStack via `docker compose`; integration tests gate on TCP probes and skip cleanly when the deps aren't running
 
 ## Domain model
 
@@ -118,7 +103,7 @@ The integration with the external payment processor is structured around three p
 
 **Layered resilience.** Every external call has a timeout, an idempotency key, a circuit breaker (Resilience4j), and a bulkhead. Retries are policy-based: never retry on `Unknown`, retry with backoff on definite transient errors, never retry on declines.
 
-**Bounded reconciliation.** When `Unknown` occurs, an event is queued; a consumer calls `processor.lookup()` after a delay and acts on the actual outcome. Reconciliation has a hard cap of 10 attempts over 24 hours; after that, intents are surfaced for human review rather than left in `PROCESSING` indefinitely.
+**Bounded reconciliation.** When `Unknown` occurs, the consumer leaves the intent in `PROCESSING`; a `@Scheduled` reconciliation job picks it up after a stuck-threshold and calls `processor.lookup()` to discover what really happened. The current scaffold polls every 30s by default and applies any definitive outcome via the same use case path; a 10-attempts/24h give-up cap is the next polish item before this would be production-ready.
 
 A single UUID flows through the entire async pipeline: outbox row ID → SQS deduplication ID → processor idempotency key → consumer's processed-events table. One identity end-to-end.
 
@@ -156,19 +141,22 @@ ArchUnit tests assert that `domain` does not depend on Spring, JDBC, or any adap
 
 ## Infrastructure
 
-Two CDK stacks. The split exists because network resources are stable and rarely change, while service resources change with every deploy.
+Three CDK stacks. Different lifecycles, different deploy cadences.
 
-**`NetworkStack`** — single VPC, two AZs, public and isolated subnets, security groups. Deliberately no NAT Gateway (cost): the Fargate service runs with a public IP for outbound, and Aurora is reachable only from the app's security group via private routing. In production I would either add a NAT Gateway or use VPC endpoints for AWS services.
+**`PaymentBootstrap`** — one-time per AWS account. Provisions the GitHub Actions OIDC provider plus two roles trust-scoped via the `sub` claim: a deploy role trusted only from `refs/heads/main`, and a read-only role trusted from any branch in the repo. Output ARNs go into the repo's `DEPLOY_ROLE_ARN` and `READONLY_ROLE_ARN` secrets.
 
-**`PaymentServiceStack`** — Aurora Serverless v2 (min 0 ACU, max 1 ACU, scale-to-zero enabled), ECS Fargate service behind ALB, SQS FIFO + DLQ, Lambda consumer, CloudWatch dashboards and alarms, IAM roles. Database credentials managed via Secrets Manager and injected as environment variables at task start.
+**`NetworkStack`** — VPC only. Two AZs, public and isolated subnets, no NAT Gateway by design (cost): the Fargate service runs with a public IP for outbound, and Aurora is reachable only from the app's security group via private routing. In production I would either add a NAT Gateway or use VPC endpoints for AWS services. Security groups deliberately live in the service stack rather than here so SG-to-SG rules stay intra-stack and don't form a dependency cycle.
+
+**`PaymentServiceStack`** — security groups, Aurora Serverless v2 (min 0 ACU, max 1 ACU, scale-to-zero enabled), ECS Fargate service behind ALB with the app's polling SQS consumer in the same JVM, SQS FIFO + DLQ, CloudWatch dashboards and alarms, IAM roles. Database credentials managed via Secrets Manager: the JDBC URL is composed at runtime from `host`/`port`/`dbname` injected as separate ECS secrets.
 
 CDK unit tests assert structural invariants:
 
 - Aurora cluster has `storageEncrypted: true`
-- DB security group allows ingress only from app security group
-- Every Lambda has a log retention policy
 - Every queue has a redrive policy
 - Every SNS topic enforces TLS
+- ECS service has the deployment circuit breaker enabled (`Rollback: true`)
+- The app log group name `/aws/ecs/payment-service` matches the dashboard's Logs Insights query
+- Bootstrap's deploy role trust is scoped to `refs/heads/main`; readonly role to the repo
 
 These tests treat security and reliability invariants as code-reviewable assertions. A future change that violates them fails CI.
 
@@ -188,7 +176,7 @@ CloudWatch metric cardinality is deliberately bounded; tag dimensions are limite
 
 Three GitHub Actions workflows: `pr-checks.yml`, `deploy.yml`, and `nightly.yml`.
 
-PR checks run in parallel: app build with unit and integration tests (Testcontainers), static analysis (Spotless, OWASP Dependency Check), CDK type-check and synth, CDK unit tests, and an automated `cdk diff` posted as a PR comment so reviewers see exactly which AWS resources will change. PR feedback target is under 8 minutes.
+PR checks run in parallel: app build with unit and integration tests, static analysis (Spotless), CDK type-check, synth, and unit tests. PR feedback target is under 8 minutes. A `cdk diff` PR comment using the read-only OIDC role is scaffolded but disabled — uncomment in `pr-checks.yml` once the role secret is populated.
 
 Deploy on merge to `main` runs sequentially: build app → publish image to ECR → deploy infra (`cdk deploy`) → run Flyway migrations → update ECS service → smoke test against deployed service → automatic rollback on smoke-test failure.
 
@@ -225,27 +213,36 @@ The cost-conscious deploy mode is `cdk deploy -c running=true` to scale up befor
 ```bash
 # Prerequisites: Java 21, Docker, Node 20
 
-# Run the application locally with Testcontainers Postgres
+# Bring up Postgres + LocalStack
+docker compose up -d
+
+# Run the service against compose Postgres on localhost:5432
 ./gradlew bootRun
 
-# Run all tests
+# Full test suite. Integration tests are gated on TCP probes of localhost:5432
+# (Postgres) and localhost:4566 (LocalStack); they skip cleanly when those
+# aren't running rather than failing.
 ./gradlew test
 
 # Synth the CDK stacks (no AWS account required)
 cd infrastructure
 npm install
-npx cdk synth
+npx cdk synth --all
 ```
 
-Local development uses Testcontainers for Postgres and LocalStack for SQS. The processor is wired to the stub adapter via the `local` Spring profile.
+The processor adapter is wired by `@Profile("!real-processor")`, so the stub is on by default in every environment that doesn't explicitly opt out.
 
 ## Deploying
 
 ```bash
 cd infrastructure
 npm install
-npx cdk bootstrap          # one-time per account/region
-npx cdk deploy --all       # deploys both stacks
+npx cdk bootstrap                           # CDK bootstrap, once per account/region
+npx cdk deploy PaymentBootstrap \
+  -c githubOrg=<your-org>                   # one-time: GitHub OIDC + IAM roles
+# Then copy DeployRoleArn and ReadonlyRoleArn from the outputs into the
+# repo's DEPLOY_ROLE_ARN / READONLY_ROLE_ARN secrets.
+npx cdk deploy PaymentNetwork PaymentService   # day-to-day
 ```
 
 After deploy, the ALB DNS name is exported as a CloudFormation output. Smoke test:
@@ -276,9 +273,9 @@ A few specific things worth examining:
 
 ## Project status
 
-This repository is a **scaffold**. The directory structure, CDK stack signatures, key interfaces, README documentation, and CI/CD workflows are in place. Method bodies and concrete implementations are stubs marked with `TODO`. Building this out is the work; the README is the design doc to build against.
+Phases 1–9 of `docs/BUILD_ORDER.md` are complete. The domain, application use cases, JDBC persistence, REST adapter with idempotency filter, async pipeline (outbox dispatcher + SQS consumer + reconciliation), CDK stacks, CloudWatch observability, CI/CD workflows, and polish are in place.
 
-See `docs/BUILD_ORDER.md` for a suggested implementation sequence.
+A handful of operational TODOs remain in `.github/workflows/deploy.yml` (separate Flyway migration task, smoke test against a live ALB, ECR image cleanup) — these need an actual AWS account to validate, so they're labeled rather than guessed at.
 
 ## License
 

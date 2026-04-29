@@ -7,6 +7,7 @@ import com.example.payments.domain.port.OutboxRepository;
 import com.example.payments.domain.port.PaymentIntentRepository;
 import com.example.payments.domain.port.PaymentProcessor.AuthorizationResult;
 import java.time.Clock;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Applies an authorization outcome to an intent currently awaiting authorization.
@@ -35,6 +36,7 @@ public class ApplyAuthorizationOutcome {
         this.clock = clock;
     }
 
+    @Transactional
     public PaymentIntent execute(PaymentIntentId id, AuthorizationResult result) {
         var intent =
                 repository.findById(id).orElseThrow(() -> new PaymentIntentNotFoundException(id));

@@ -7,6 +7,7 @@ import com.example.payments.domain.model.PaymentIntentId;
 import com.example.payments.domain.port.OutboxRepository;
 import com.example.payments.domain.port.PaymentIntentRepository;
 import java.time.Clock;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Captures part or all of an authorized intent. The aggregate enforces the "captured ≤ authorized"
@@ -25,6 +26,7 @@ public class CapturePayment {
         this.clock = clock;
     }
 
+    @Transactional
     public PaymentIntent execute(PaymentIntentId id, Money captureAmount) {
         var intent =
                 repository.findById(id).orElseThrow(() -> new PaymentIntentNotFoundException(id));

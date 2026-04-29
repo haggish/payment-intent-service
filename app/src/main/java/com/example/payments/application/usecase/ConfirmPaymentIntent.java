@@ -8,6 +8,7 @@ import com.example.payments.domain.port.OutboxRepository;
 import com.example.payments.domain.port.PaymentIntentRepository;
 import java.time.Clock;
 import java.util.Optional;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Optionally attaches a payment method, then transitions REQUIRES_CONFIRMATION → PROCESSING.
@@ -28,6 +29,7 @@ public class ConfirmPaymentIntent {
         this.clock = clock;
     }
 
+    @Transactional
     public PaymentIntent execute(PaymentIntentId id, Optional<PaymentMethod> method) {
         var intent =
                 repository.findById(id).orElseThrow(() -> new PaymentIntentNotFoundException(id));

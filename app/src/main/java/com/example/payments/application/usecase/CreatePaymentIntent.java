@@ -7,6 +7,7 @@ import com.example.payments.domain.model.PaymentIntent;
 import com.example.payments.domain.port.OutboxRepository;
 import com.example.payments.domain.port.PaymentIntentRepository;
 import java.time.Clock;
+import org.springframework.transaction.annotation.Transactional;
 
 public class CreatePaymentIntent {
 
@@ -23,10 +24,10 @@ public class CreatePaymentIntent {
 
     /**
      * Creates a payment intent and persists it together with its emitted events to the outbox in
-     * one transaction.
-     *
-     * <p>TODO: wrap in @Transactional in the Spring-aware caller.
+     * one transaction. {@code @Transactional} ensures the aggregate write and the outbox write
+     * commit atomically — a crash between them would otherwise lose events.
      */
+    @Transactional
     public PaymentIntent execute(MerchantId merchantId, Money amount, IdempotencyKey key) {
         var intent = PaymentIntent.create(merchantId, amount, key, clock.instant());
         repository.save(intent);

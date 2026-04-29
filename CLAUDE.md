@@ -4,25 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-**This repo is a scaffold.** Directory structure, CDK stack signatures, key interfaces, Flyway migrations, and CI workflows are in place; most method bodies are stubs marked with `TODO`. The README is the design doc to build against, and `docs/BUILD_ORDER.md` defines the implementation sequence (Phase 1 = pure domain, Phase 9 = polish). Treat the README's design claims as load-bearing — implementations are expected to match them rather than diverge.
+**Phases 1–9 complete.** Domain, application use cases, JDBC adapters, REST adapter with idempotency filter, async pipeline (outbox dispatcher + SQS consumer + reconciliation), CDK stacks, observability, CI/CD, and polish are all in. The README is the design doc — treat its claims as load-bearing and keep implementations matching it rather than diverging. `docs/BUILD_ORDER.md` records the original sequence.
 
-When adding code, check whether the surrounding file is a stub. New work should fit into the existing hexagonal package layout, not create parallel structures.
+When adding code, fit into the existing hexagonal package layout rather than creating parallel structures.
 
 ## Repository layout
 
 Two top-level builds:
 
 - `app/` — Spring Boot 3 / Java 21 service, built with Gradle (`settings.gradle` includes only `app`).
-- `infrastructure/` — AWS CDK in TypeScript, separate npm project. Two stacks: `NetworkStack` (stable: VPC only) and `PaymentServiceStack` (everything else: SGs, Aurora, Fargate, SQS, observability).
+- `infrastructure/` — AWS CDK in TypeScript, separate npm project. Three stacks: `PaymentBootstrap` (one-time: GitHub Actions OIDC provider + deploy/readonly IAM roles), `NetworkStack` (stable: VPC only), `PaymentServiceStack` (per-deploy: SGs, Aurora, Fargate, SQS, observability).
 
-The split between the two stacks is intentional — keep network resources stable and put per-deploy resources in `PaymentServiceStack`. Security groups live in `PaymentServiceStack` rather than `NetworkStack` so SG-to-SG rules (ALB → app, app → DB) stay intra-stack; otherwise the auto-wired ALB→app ingress would form a dependency cycle with the network stack.
+The split is intentional — keep network resources stable and put per-deploy resources in `PaymentServiceStack`. Security groups live in `PaymentServiceStack` rather than `NetworkStack` so SG-to-SG rules (ALB → app, app → DB) stay intra-stack; otherwise the auto-wired ALB→app ingress would form a dependency cycle with the network stack. `PaymentBootstrap` is deployed once per AWS account; copy its `DeployRoleArn` and `ReadonlyRoleArn` outputs into the repo's `DEPLOY_ROLE_ARN` and `READONLY_ROLE_ARN` GitHub secrets.
 
 ## Common commands
 
 ```bash
+# Local dependencies (run once per session)
+docker compose up -d               # Postgres + LocalStack (SQS)
+
 # App
-./gradlew bootRun                  # run service locally (Testcontainers Postgres via local profile)
-./gradlew test                     # all unit + integration tests
+./gradlew bootRun                  # run against compose Postgres on localhost:5432
+./gradlew test                     # full suite; ITs gated on Postgres + LocalStack reachability
 ./gradlew test --tests '<FQCN>'    # single test class
 ./gradlew test --tests '<FQCN>.<method>'   # single test method
 ./gradlew build jacocoTestReport   # full PR-equivalent build with coverage
@@ -32,12 +35,15 @@ The split between the two stacks is intentional — keep network resources stabl
 # Infrastructure (run from infrastructure/)
 npm ci
 npx tsc --noEmit                   # type check
-npx cdk synth --all                # synth both stacks (no AWS account needed)
+npx cdk synth --all                # synth all three stacks (no AWS account needed)
 npx jest                           # CDK unit tests (structural invariants)
-npx cdk deploy --all
-npx cdk deploy -c running=true     # demo mode (Fargate task count > 0)
-npx cdk deploy -c running=false    # idle mode (scale to zero)
+npx cdk deploy PaymentBootstrap    # one-time per account; sets up GitHub OIDC + roles
+npx cdk deploy PaymentNetwork PaymentService   # day-to-day deploys
+npx cdk deploy -c running=true PaymentService  # demo mode (Fargate task count > 0)
+npx cdk deploy -c running=false PaymentService # idle mode (scale to zero)
 ```
+
+The integration tests (`JdbcRepositoriesIT`, `PaymentIntentControllerIT`, `AsyncPipelineIT`) are gated with `@EnabledIf` on a TCP probe of localhost:5432 (Postgres) and localhost:4566 (LocalStack). They skip cleanly when those aren't running rather than failing.
 
 The test suite registers both JUnit Jupiter and **jqwik** engines (see `app/build.gradle`); property-based tests in the domain layer rely on jqwik being included.
 
@@ -74,7 +80,7 @@ The service is out of PCI scope by design — `PaymentMethod` is a token referen
 
 ## CDK invariants
 
-CDK unit tests (`infrastructure/test/`) treat security/reliability properties as code-reviewable assertions: Aurora `storageEncrypted: true`, DB SG ingress only from app SG, every Lambda has a log retention policy, every queue has a redrive policy, every SNS topic enforces TLS. New constructs should preserve these invariants — failing tests indicate a real regression, not a test to update.
+CDK unit tests (`infrastructure/test/`) treat security/reliability properties as code-reviewable assertions. Current invariants: Aurora `storageEncrypted: true`, every queue has a redrive policy, every SNS topic enforces TLS, ECS deployment circuit breaker enabled, the app log group name `/aws/ecs/payment-service` matches the dashboard's Logs Insights query, and `PaymentBootstrap`'s OIDC roles are trust-scoped (deploy = main only, readonly = any branch in this repo). New constructs should preserve these invariants — failing tests indicate a real regression, not a test to update.
 
 Jest is configured in `infrastructure/jest.config.js` with `ts-jest` and a `testPathIgnorePatterns` for `cdk.out/` — without that exclude, jest discovers test files inside Docker asset stagings and tries to run them.
 
@@ -95,4 +101,7 @@ AWS auth from GitHub Actions uses **OIDC federation** (no long-lived keys). Two 
 - `app/src/main/java/com/example/payments/adapter/out/persistence/OutboxDispatcher.java` — `FOR UPDATE SKIP LOCKED` polling dispatcher
 - `app/src/main/java/com/example/payments/adapter/out/processor/StubPaymentProcessor.java` — failure-mode simulation
 - `infrastructure/lib/observability/dashboard.ts` and `alarms.ts` — operator-facing observability
-- `app/src/main/resources/db/migration/` — V1–V4 Flyway migrations
+- `app/src/main/java/com/example/payments/adapter/in/rest/IdempotencyFilter.java` — five-case filter wrapping POST `/v1/payment-intents/**`
+- `app/src/main/java/com/example/payments/adapter/in/sqs/PaymentEventListener.java` — polling consumer, dedup-in-tx pattern
+- `app/src/main/java/com/example/payments/adapter/out/reconciliation/ReconciliationJob.java` — picks up intents stuck in PROCESSING via `processor.lookup`
+- `app/src/main/resources/db/migration/` — V1–V5 Flyway migrations (V5 adds `seq` column to captures/refunds for stable order on reload)

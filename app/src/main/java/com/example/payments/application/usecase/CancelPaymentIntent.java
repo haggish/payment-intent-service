@@ -6,6 +6,7 @@ import com.example.payments.domain.model.PaymentIntentId;
 import com.example.payments.domain.port.OutboxRepository;
 import com.example.payments.domain.port.PaymentIntentRepository;
 import java.time.Clock;
+import org.springframework.transaction.annotation.Transactional;
 
 public class CancelPaymentIntent {
 
@@ -20,6 +21,7 @@ public class CancelPaymentIntent {
         this.clock = clock;
     }
 
+    @Transactional
     public PaymentIntent execute(PaymentIntentId id, String reason) {
         var intent =
                 repository.findById(id).orElseThrow(() -> new PaymentIntentNotFoundException(id));
