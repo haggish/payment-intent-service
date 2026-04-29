@@ -21,7 +21,7 @@ replay_pid*
 *.iml
 *.iws
 *.ipr
-out/
+/out/
 .vscode/
 .project
 .classpath

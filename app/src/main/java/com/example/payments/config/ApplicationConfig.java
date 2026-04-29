@@ -1,6 +1,7 @@
 package com.example.payments.config;
 
 import com.example.payments.application.idempotency.IdempotencyService;
+import com.example.payments.application.usecase.ApplyAuthorizationOutcome;
 import com.example.payments.application.usecase.CancelPaymentIntent;
 import com.example.payments.application.usecase.CapturePayment;
 import com.example.payments.application.usecase.ConfirmPaymentIntent;
@@ -58,5 +59,11 @@ public class ApplicationConfig {
     CreateRefund createRefund(
             PaymentIntentRepository repository, OutboxRepository outbox, Clock clock) {
         return new CreateRefund(repository, outbox, clock);
+    }
+
+    @Bean
+    ApplyAuthorizationOutcome applyAuthorizationOutcome(
+            PaymentIntentRepository repository, OutboxRepository outbox, Clock clock) {
+        return new ApplyAuthorizationOutcome(repository, outbox, clock);
     }
 }
