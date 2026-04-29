@@ -2,7 +2,9 @@ spring:
   application:
     name: payment-intent-service
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/payments}
+    # Prefer a full SPRING_DATASOURCE_URL when set (local dev). Otherwise compose from
+    # host/port/db parts so Aurora can supply them as separate Secrets Manager fields.
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${SPRING_DATASOURCE_HOST:localhost}:${SPRING_DATASOURCE_PORT:5432}/${SPRING_DATASOURCE_DB:payments}}
     username: ${SPRING_DATASOURCE_USERNAME:payments}
     password: ${SPRING_DATASOURCE_PASSWORD:payments}
     hikari:

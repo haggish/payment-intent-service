@@ -89,17 +89,22 @@ export class PaymentServiceStack extends cdk.Stack {
       cpu: 256,
       memoryLimitMiB: 512,
       desiredCount: this.node.tryGetContext('running') === 'false' ? 0 : 1,
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
       taskImageOptions: {
         image: ecs.ContainerImage.fromDockerImageAsset(appImage),
         containerPort: 8080,
         environment: {
           OUTBOX_QUEUE_URL: eventsQueue.queueUrl,
           SPRING_PROFILES_ACTIVE: 'prod',
+          RECONCILIATION_ENABLED: 'true',
         },
         secrets: {
           SPRING_DATASOURCE_USERNAME: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'username'),
           SPRING_DATASOURCE_PASSWORD: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'password'),
-          SPRING_DATASOURCE_URL: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'host'), // TODO: build full JDBC URL
+          SPRING_DATASOURCE_HOST: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'host'),
+          SPRING_DATASOURCE_PORT: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'port'),
+          SPRING_DATASOURCE_DB: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'dbname'),
         },
         logDriver: ecs.LogDrivers.awsLogs({
           streamPrefix: 'payment-service',
