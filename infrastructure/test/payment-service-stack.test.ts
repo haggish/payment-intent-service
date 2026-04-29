@@ -55,4 +55,12 @@ describe('PaymentServiceStack invariants', () => {
       }),
     });
   });
+
+  // dashboard.ts hardcodes /aws/ecs/payment-service for its Logs Insights widget; if either
+  // side drifts the widget points at the wrong group. Assert the stack provisions that name.
+  test('App log group name matches the one queried by the dashboard', () => {
+    template.hasResourceProperties('AWS::Logs::LogGroup', {
+      LogGroupName: '/aws/ecs/payment-service',
+    });
+  });
 });

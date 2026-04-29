@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecs_patterns from 'aws-cdk-lib/aws-ecs-patterns';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as sns from 'aws-cdk-lib/aws-sns';
@@ -84,6 +85,13 @@ export class PaymentServiceStack extends cdk.Stack {
       file: 'app/Dockerfile',
     });
 
+    // Explicit log group so dashboard.ts's Logs Insights query can target a stable name.
+    const appLogGroup = new logs.LogGroup(this, 'AppLogGroup', {
+      logGroupName: '/aws/ecs/payment-service',
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     const fargate = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'Service', {
       cluster,
       cpu: 256,
@@ -98,6 +106,7 @@ export class PaymentServiceStack extends cdk.Stack {
           OUTBOX_QUEUE_URL: eventsQueue.queueUrl,
           SPRING_PROFILES_ACTIVE: 'prod',
           RECONCILIATION_ENABLED: 'true',
+          AWS_CLOUDWATCH_ENABLED: 'true',
         },
         secrets: {
           SPRING_DATASOURCE_USERNAME: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'username'),
@@ -108,7 +117,7 @@ export class PaymentServiceStack extends cdk.Stack {
         },
         logDriver: ecs.LogDrivers.awsLogs({
           streamPrefix: 'payment-service',
-          logRetention: logs.RetentionDays.ONE_WEEK,
+          logGroup: appLogGroup,
         }),
       },
       circuitBreaker: { rollback: true },
@@ -117,6 +126,13 @@ export class PaymentServiceStack extends cdk.Stack {
     });
 
     eventsQueue.grantSendMessages(fargate.taskDefinition.taskRole);
+    eventsQueue.grantConsumeMessages(fargate.taskDefinition.taskRole);
+    fargate.taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudwatch:PutMetricData'],
+        resources: ['*'],
+      }),
+    );
     dbCluster.connections.allowDefaultPortFrom(appSg);
 
     // ---------- Alarm topics ----------
