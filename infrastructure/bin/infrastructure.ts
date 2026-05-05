@@ -12,9 +12,15 @@ const env = {
 };
 
 // Bootstrap stack — provisions the GitHub Actions OIDC federation and the deploy/readonly
-// roles. Deployed once per account; populate `githubOrg` via context (-c githubOrg=...) or
-// the GITHUB_ORG env var. The role ARNs are stack outputs to be copied into repo secrets.
-const githubOrg = app.node.tryGetContext('githubOrg') ?? process.env.GITHUB_ORG ?? 'CHANGEME';
+// roles. Deployed once per account; populate `githubOrg` via cdk.json context, -c githubOrg=...,
+// or the GITHUB_ORG env var. The role ARNs are stack outputs to be copied into repo secrets.
+const githubOrg = app.node.tryGetContext('githubOrg') ?? process.env.GITHUB_ORG;
+if (!githubOrg) {
+  throw new Error(
+    'githubOrg is required. Set it in cdk.json under "context", pass -c githubOrg=<org>, or export GITHUB_ORG. ' +
+      'It is baked into the OIDC trust policy as repo:<org>/<repo>:... — a wrong value silently produces a role no GitHub Actions run can assume.',
+  );
+}
 const githubRepo =
   app.node.tryGetContext('githubRepo') ?? process.env.GITHUB_REPO ?? 'payment-intent-service';
 
