@@ -60,11 +60,29 @@ jobs:
         run: npm ci
         working-directory: infrastructure
 
-      # Catches infrastructure drift caused by manual console changes.
-      # Any non-empty diff against the deployed stacks is a signal someone went around CI.
-      - name: CDK diff
+      # Catches drift in stacks that are actually deployed. Stacks defined in source but
+      # absent from CloudFormation (e.g., PaymentService while in idle mode per the
+      # `running=true/false` context flag) are skipped — their absence is intentional, not drift.
+      - name: CDK diff (deployed stacks only)
         id: diff
-        run: npx cdk diff --all --fail
+        run: |
+          set -euo pipefail
+          APP_STACKS=(PaymentBootstrap PaymentNetwork PaymentService)
+          deployed=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE IMPORT_COMPLETE \
+            --query 'StackSummaries[].StackName' --output text)
+          to_check=()
+          for s in "${APP_STACKS[@]}"; do
+            if grep -qw "$s" <<<"$deployed"; then
+              to_check+=("$s")
+            fi
+          done
+          if [ ${#to_check[@]} -eq 0 ]; then
+            echo "No app stacks currently deployed; skipping drift check."
+            exit 0
+          fi
+          echo "Diffing: ${to_check[*]}"
+          npx cdk diff "${to_check[@]}" --fail
         working-directory: infrastructure
 
       - name: Open drift issue
