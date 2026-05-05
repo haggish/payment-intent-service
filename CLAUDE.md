@@ -47,10 +47,6 @@ The integration tests (`JdbcRepositoriesIT`, `PaymentIntentControllerIT`, `Async
 
 The test suite registers both JUnit Jupiter and **jqwik** engines (see `app/build.gradle`); property-based tests in the domain layer rely on jqwik being included.
 
-### One-time setup gotcha
-
-`gradle/wrapper/gradle-wrapper.jar` is intentionally not committed (per `docs/SETUP.md`). On a fresh clone, generate it once with a system Gradle: `gradle wrapper --gradle-version 8.10`. After that, `./gradlew` works.
-
 ## Architecture
 
 Hexagonal layering, **enforced by ArchUnit** in `app/src/test/java/com/example/payments/architecture/HexagonalArchitectureTest.java`:

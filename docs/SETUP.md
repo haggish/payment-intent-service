@@ -1,23 +1,6 @@
 # Setup
 
-This is a scaffold. After cloning, a few one-time setup steps are needed before you can build.
-
-## Generate the Gradle wrapper
-
-The `gradle-wrapper.jar` binary is intentionally not committed in this scaffold (binaries don't review well). Generate it with a system Gradle:
-
-```bash
-# Install Gradle if you don't have it
-# macOS:   brew install gradle
-# Ubuntu:  sudo apt install gradle
-# SDKMAN:  sdk install gradle 8.10
-
-gradle wrapper --gradle-version 8.10
-```
-
-This creates `gradle/wrapper/gradle-wrapper.jar` and `gradle/wrapper/gradle-wrapper.properties`. Commit both.
-
-After that, `./gradlew build` should work.
+This is a scaffold. After cloning, a few one-time setup steps are needed before you can deploy.
 
 ## CDK bootstrap
 
