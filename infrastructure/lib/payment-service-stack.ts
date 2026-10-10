@@ -114,6 +114,8 @@ export class PaymentServiceStack extends cdk.Stack {
           SPRING_PROFILES_ACTIVE: 'prod',
           RECONCILIATION_ENABLED: 'true',
           AWS_CLOUDWATCH_ENABLED: 'true',
+          // Bound to aws.region, which otherwise falls back to a default in application.yml.
+          AWS_REGION: this.region,
         },
         secrets: {
           SPRING_DATASOURCE_USERNAME: ecs.Secret.fromSecretsManager(dbCluster.secret!, 'username'),
@@ -128,8 +130,18 @@ export class PaymentServiceStack extends cdk.Stack {
         }),
       },
       circuitBreaker: { rollback: true },
+      // Boot needs ~80s to start on 0.25 vCPU; the 60s default had ECS killing tasks before
+      // they could ever pass a health check.
+      healthCheckGracePeriod: cdk.Duration.minutes(3),
       securityGroups: [appSg],
       assignPublicIp: true, // no NAT; tasks reach AWS APIs via public IPs
+    });
+
+    // The default target-group check is GET / (a 404 here), so no task could ever turn healthy.
+    // Readiness rather than full health: a paused Aurora resuming shouldn't drain every target.
+    fargate.targetGroup.configureHealthCheck({
+      path: '/actuator/health/readiness',
+      healthyHttpCodes: '200',
     });
 
     if (idle) {

@@ -56,6 +56,22 @@ describe('PaymentServiceStack invariants', () => {
     });
   });
 
+  // The default target-group check (GET /) returns 404 from the app, which made every task
+  // unhealthy and tripped the deployment circuit breaker.
+  test('Load balancer health check targets the actuator readiness probe', () => {
+    template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
+      HealthCheckPath: '/actuator/health/readiness',
+      Matcher: { HttpCode: '200' },
+    });
+  });
+
+  // Boot takes ~80s to start on 0.25 vCPU; a shorter grace period kills tasks mid-startup.
+  test('ECS service allows the app enough time to start', () => {
+    const services = Object.values(template.findResources('AWS::ECS::Service'));
+    expect(services).toHaveLength(1);
+    expect(services[0].Properties.HealthCheckGracePeriodSeconds).toBeGreaterThanOrEqual(180);
+  });
+
   // dashboard.ts hardcodes /aws/ecs/payment-service for its Logs Insights widget; if either
   // side drifts the widget points at the wrong group. Assert the stack provisions that name.
   test('App log group name matches the one queried by the dashboard', () => {
