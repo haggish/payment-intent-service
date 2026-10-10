@@ -13,6 +13,9 @@ spring:
       connection-timeout: 5000
   flyway:
     enabled: true
+    # Aurora scaled to zero takes ~15s+ to resume; without retries a task starting against a
+    # paused cluster fails Flyway and crash-loops.
+    connect-retries: 10
     baseline-on-migrate: true
 
 server:

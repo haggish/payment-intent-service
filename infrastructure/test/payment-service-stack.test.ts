@@ -65,11 +65,30 @@ describe('PaymentServiceStack invariants', () => {
     });
   });
 
-  // Boot takes ~80s to start on 0.25 vCPU; a shorter grace period kills tasks mid-startup.
+  // Startup (~110s) plus the time to pass the healthy threshold must fit in the grace period,
+  // or ECS replaces healthy-but-slow tasks.
+  test('A started task can turn healthy within the grace period', () => {
+    const STARTUP_SECONDS = 110;
+    const service = Object.values(template.findResources('AWS::ECS::Service'))[0].Properties;
+    const tg = Object.values(
+      template.findResources('AWS::ElasticLoadBalancingV2::TargetGroup'),
+    )[0].Properties;
+    const toHealthy = tg.HealthCheckIntervalSeconds * tg.HealthyThresholdCount;
+    expect(STARTUP_SECONDS + toHealthy).toBeLessThan(service.HealthCheckGracePeriodSeconds);
+  });
+
+  test('ECS service waits for the database writer instance', () => {
+    const [serviceId] = Object.keys(template.findResources('AWS::ECS::Service'));
+    const [writerId] = Object.keys(template.findResources('AWS::RDS::DBInstance'));
+    const dependsOn: string[] = template.toJSON().Resources[serviceId].DependsOn ?? [];
+    expect(dependsOn).toContain(writerId);
+  });
+
+  // Boot takes ~80-110s to start on 0.25 vCPU; a shorter grace period kills tasks mid-startup.
   test('ECS service allows the app enough time to start', () => {
     const services = Object.values(template.findResources('AWS::ECS::Service'));
     expect(services).toHaveLength(1);
-    expect(services[0].Properties.HealthCheckGracePeriodSeconds).toBeGreaterThanOrEqual(180);
+    expect(services[0].Properties.HealthCheckGracePeriodSeconds).toBeGreaterThanOrEqual(240);
   });
 
   // dashboard.ts hardcodes /aws/ecs/payment-service for its Logs Insights widget; if either
