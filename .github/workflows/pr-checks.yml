@@ -36,6 +36,78 @@ jobs:
           name: test-reports
           path: app/build/reports/
 
+  # The ITs are gated on a TCP probe of localhost:5432 / :4566 and skip silently
+  # when nothing answers, so app-build-and-test never exercises them. This job
+  # provides the same Postgres + LocalStack as docker-compose.yml and then
+  # asserts the ITs really ran, so a broken service setup can't pass as green.
+  app-integration-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: payments
+          POSTGRES_PASSWORD: payments
+          POSTGRES_DB: payments
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payments -d payments"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      localstack:
+        image: localstack/localstack:3.7
+        env:
+          SERVICES: sqs
+          DEFAULT_REGION: eu-west-1
+          AWS_DEFAULT_REGION: eu-west-1
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -fsS http://localhost:4566/_localstack/health || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Integration tests
+        run: ./gradlew test --tests '*IT' --no-daemon
+
+      - name: Assert ITs ran (none skipped)
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import glob, sys, xml.etree.ElementTree as ET
+          expected = {"JdbcRepositoriesIT", "PaymentIntentControllerIT", "AsyncPipelineIT"}
+          seen = {}
+          for f in glob.glob("app/build/test-results/test/TEST-*IT.xml"):
+              s = ET.parse(f).getroot()
+              seen[s.get("name").rsplit(".", 1)[-1]] = (int(s.get("tests")), int(s.get("skipped")))
+          ok = True
+          for name in sorted(expected):
+              tests, skipped = seen.get(name, (0, 0))
+              print(f"{name}: {tests} tests, {skipped} skipped")
+              if tests == 0 or skipped:
+                  ok = False
+          sys.exit(0 if ok else "Integration tests were skipped or missing - are the service containers reachable?")
+          EOF
+
+      - name: Upload IT reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-test-reports
+          path: app/build/reports/tests/
+
   app-static-analysis:
     runs-on: ubuntu-latest
     steps:
