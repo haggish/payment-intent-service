@@ -130,19 +130,27 @@ export class PaymentServiceStack extends cdk.Stack {
         }),
       },
       circuitBreaker: { rollback: true },
-      // Boot needs ~80s to start on 0.25 vCPU; the 60s default had ECS killing tasks before
-      // they could ever pass a health check.
-      healthCheckGracePeriod: cdk.Duration.minutes(3),
+      // Boot needs ~80-110s to start on 0.25 vCPU, then the target needs healthyThresholdCount
+      // passing checks; ECS replaces the task if that isn't done within the grace period.
+      healthCheckGracePeriod: cdk.Duration.minutes(4),
       securityGroups: [appSg],
       assignPublicIp: true, // no NAT; tasks reach AWS APIs via public IPs
     });
 
     // The default target-group check is GET / (a 404 here), so no task could ever turn healthy.
     // Readiness rather than full health: a paused Aurora resuming shouldn't drain every target.
+    // Two passes 15s apart: the default (5 x 30s) took 150s after startup to mark the target
+    // healthy, outlasting the grace period, so ECS replaced tasks that were actually fine.
     fargate.targetGroup.configureHealthCheck({
       path: '/actuator/health/readiness',
       healthyHttpCodes: '200',
+      interval: cdk.Duration.seconds(15),
+      healthyThresholdCount: 2,
     });
+
+    // Without this, ECS starts tasks as soon as the cluster and its secret exist, before the
+    // writer instance accepts connections, and the first tasks crash in Flyway.
+    fargate.service.node.addDependency(dbCluster);
 
     if (idle) {
       (fargate.service.node.defaultChild as ecs.CfnService).desiredCount = 0;
