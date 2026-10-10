@@ -90,7 +90,7 @@ The `DockerImageAsset` for the Fargate image uses the **repo root** as build con
 
 Three workflows in `.github/workflows/`: `pr-checks.yml` (parallel: app build+test, Spotless, CDK type-check/synth/jest), `deploy.yml` (on merge to main: build → `cdk deploy` of only the already-deployed `PaymentNetwork`/`PaymentService`, preserving running/idle mode → smoke test → task-definition rollback on smoke failure; never deploys `PaymentBootstrap`; the image ships as a CDK `DockerImageAsset`, there is no separate ECR repo), `nightly.yml`.
 
-AWS auth from GitHub Actions uses **OIDC federation** (no long-lived keys). Two roles are expected as repo secrets: `DEPLOY_ROLE_ARN` (trusted only from `main`) and `READONLY_ROLE_ARN` (trusted from PR branches for synth/diff). DB migrations follow **expand/contract** so deploys can roll forward and back without coordination — schema changes must be backward-compatible with the currently-deployed app version.
+AWS auth from GitHub Actions uses **OIDC federation** (no long-lived keys). Two roles are expected as repo secrets: `DEPLOY_ROLE_ARN` (trusted only from `main`) and `READONLY_ROLE_ARN` (trusted from PR branches for synth/diff). Don't add `environment:` to a job that assumes the deploy role: it switches the OIDC `sub` claim to `repo:…:environment:<name>`, which the main-only trust rejects (this kept every deploy from authenticating until it was removed). DB migrations follow **expand/contract** so deploys can roll forward and back without coordination — schema changes must be backward-compatible with the currently-deployed app version.
 
 ## Pointers worth opening first
 
