@@ -11,7 +11,7 @@ RUN ./gradlew :app:bootJar --no-daemon
 FROM eclipse-temurin:21-jre-alpine AS extract
 WORKDIR /workspace
 COPY --from=build /workspace/app/build/libs/*.jar application.jar
-RUN java -Djarmode=layertools -jar application.jar extract
+RUN java -Djarmode=tools -jar application.jar extract --layers --launcher --destination .
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine

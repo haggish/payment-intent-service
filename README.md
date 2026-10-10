@@ -30,7 +30,7 @@ Three CDK stacks: `PaymentBootstrap` (one-time GitHub OIDC + IAM roles), `Networ
 
 ## Tech stack
 
-- **Application**: Java 21, Spring Boot 3, Spring Web, Spring Data JDBC, Flyway, Resilience4j, Micrometer
+- **Application**: Java 21, Spring Boot 4, Spring Web MVC, Spring Data JDBC, Flyway, Resilience4j, Micrometer
 - **Database**: Aurora Serverless v2 PostgreSQL with scale-to-zero
 - **Messaging**: SQS FIFO, SQS DLQ, custom outbox pattern
 - **Compute**: ECS Fargate behind ALB; consumer runs in the same JVM via a polling adapter (Lambda would be a drop-in alternative)

@@ -3,13 +3,13 @@ package com.example.payments.config;
 import com.example.payments.adapter.in.rest.IdempotencyFilter;
 import com.example.payments.application.idempotency.IdempotencyService;
 import com.example.payments.domain.port.IdempotencyRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Clock;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration
 public class WebConfig {

@@ -7,7 +7,6 @@ import com.example.payments.domain.model.MerchantId;
 import com.example.payments.domain.port.IdempotencyRepository;
 import com.example.payments.domain.port.IdempotencyRepository.CompletedResponse;
 import com.example.payments.domain.port.IdempotencyRepository.ReservationContext;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
@@ -28,6 +27,7 @@ import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
+import tools.jackson.databind.ObjectMapper;
 
 public class IdempotencyFilter extends OncePerRequestFilter {
 
