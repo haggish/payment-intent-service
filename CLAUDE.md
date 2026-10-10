@@ -29,7 +29,7 @@ docker compose up -d               # Postgres + LocalStack (SQS)
 ./gradlew test --tests '<FQCN>'    # single test class
 ./gradlew test --tests '<FQCN>.<method>'   # single test method
 ./gradlew build jacocoTestReport   # full PR-equivalent build with coverage
-./gradlew spotlessCheck            # lint (Google Java Format AOSP, 1.22.0)
+./gradlew spotlessCheck            # lint (Google Java Format AOSP, 1.36.1)
 ./gradlew spotlessApply            # auto-format
 
 # Infrastructure (run from infrastructure/)
