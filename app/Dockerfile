@@ -11,7 +11,8 @@ RUN ./gradlew :app:bootJar --no-daemon
 FROM eclipse-temurin:21-jre-alpine AS extract
 WORKDIR /workspace
 COPY --from=build /workspace/app/build/libs/*.jar application.jar
-RUN java -Djarmode=tools -jar application.jar extract --layers --launcher --destination .
+# The tools jarmode refuses a non-empty destination, so extract beside the jar, not over it.
+RUN java -Djarmode=tools -jar application.jar extract --layers --launcher --destination extracted
 
 # Runtime stage
 FROM eclipse-temurin:21-jre-alpine
@@ -20,10 +21,10 @@ WORKDIR /app
 RUN addgroup -S spring && adduser -S spring -G spring
 USER spring:spring
 
-COPY --from=extract /workspace/dependencies/ ./
-COPY --from=extract /workspace/spring-boot-loader/ ./
-COPY --from=extract /workspace/snapshot-dependencies/ ./
-COPY --from=extract /workspace/application/ ./
+COPY --from=extract /workspace/extracted/dependencies/ ./
+COPY --from=extract /workspace/extracted/spring-boot-loader/ ./
+COPY --from=extract /workspace/extracted/snapshot-dependencies/ ./
+COPY --from=extract /workspace/extracted/application/ ./
 
 EXPOSE 8080
 

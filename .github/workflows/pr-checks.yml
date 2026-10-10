@@ -108,6 +108,16 @@ jobs:
           name: integration-test-reports
           path: app/build/reports/tests/
 
+  # The deploy builds this image via CDK's DockerImageAsset; build it here too so a broken
+  # Dockerfile fails the PR rather than the first deploy after merge.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build app image
+        run: docker build -f app/Dockerfile -t payment-intent-service:pr .
+
   app-static-analysis:
     runs-on: ubuntu-latest
     steps:
