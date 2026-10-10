@@ -35,7 +35,7 @@ docker compose up -d               # Postgres + LocalStack (SQS)
 # Infrastructure (run from infrastructure/)
 npm ci
 npx tsc --noEmit                   # type check
-npx cdk synth --all                # synth all three stacks (no AWS account needed)
+npx cdk synth                      # synth all three stacks (no AWS account needed)
 npx jest                           # CDK unit tests (structural invariants)
 npx cdk deploy PaymentBootstrap    # one-time per account; sets up GitHub OIDC + roles
 npx cdk deploy PaymentNetwork PaymentService   # day-to-day deploys

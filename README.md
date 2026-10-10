@@ -227,7 +227,7 @@ docker compose up -d
 # Synth the CDK stacks (no AWS account required)
 cd infrastructure
 npm install
-npx cdk synth --all
+npx cdk synth
 ```
 
 The processor adapter is wired by `@Profile("!real-processor")`, so the stub is on by default in every environment that doesn't explicitly opt out.
