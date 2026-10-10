@@ -18,8 +18,6 @@ env:
 jobs:
   build-app:
     runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -30,58 +28,29 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # Gate only. The image itself is built and pushed by `cdk deploy` via the
+      # DockerImageAsset in PaymentServiceStack — there is no separate ECR repo.
       - name: Build & test
         run: ./gradlew build --no-daemon
 
-      - name: Compute image tag
-        id: meta
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload jar
-        uses: actions/upload-artifact@v7
-        with:
-          name: app-jar
-          path: app/build/libs/*.jar
-
-  publish-image:
+  # Deploys only stacks that already exist in CloudFormation (same rule as nightly
+  # drift detection). Creating PaymentNetwork / PaymentService, or tearing them down,
+  # is a manual decision because of cost. PaymentBootstrap is never deployed from CI:
+  # it owns this workflow's own OIDC trust, so a bad change could lock CI out.
+  #
+  # Flyway runs on app startup, so the schema migrates as the new tasks roll out.
+  # Migrations follow expand/contract so old and new tasks can share the schema.
+  # A failed rollout is rolled back by CloudFormation + the ECS circuit breaker.
+  deploy-infra:
     needs: build-app
     runs-on: ubuntu-latest
-    outputs:
-      image-uri: ${{ steps.push.outputs.uri }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: app-jar
-          path: app/build/libs
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & push image
-        id: push
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPO: payment-intent-service
-          TAG: ${{ needs.build-app.outputs.image-tag }}
-        run: |
-          docker build -f app/Dockerfile -t "$REGISTRY/$REPO:$TAG" -t "$REGISTRY/$REPO:latest" .
-          docker push "$REGISTRY/$REPO:$TAG"
-          docker push "$REGISTRY/$REPO:latest"
-          echo "uri=$REGISTRY/$REPO:$TAG" >> "$GITHUB_OUTPUT"
-
-  deploy-infra:
-    needs: publish-image
-    runs-on: ubuntu-latest
     environment: production
+    outputs:
+      service-deployed: ${{ steps.plan.outputs.service_deployed }}
+      running: ${{ steps.plan.outputs.running }}
+      cluster: ${{ steps.plan.outputs.cluster }}
+      service: ${{ steps.plan.outputs.service }}
+      previous-task-def: ${{ steps.plan.outputs.previous_task_def }}
     steps:
       - uses: actions/checkout@v7
 
@@ -101,64 +70,66 @@ jobs:
         run: npm ci
         working-directory: infrastructure
 
+      - name: Plan (which stacks exist, current running mode)
+        id: plan
+        run: |
+          set -euo pipefail
+          deployed=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE IMPORT_COMPLETE \
+            --query 'StackSummaries[].StackName' --output text)
+          stacks=()
+          for s in PaymentNetwork PaymentService; do
+            if grep -qw "$s" <<<"$deployed"; then stacks+=("$s"); fi
+          done
+          echo "stacks=${stacks[*]:-}" >> "$GITHUB_OUTPUT"
+
+          running=false
+          if [[ " ${stacks[*]:-} " == *" PaymentService "* ]]; then
+            echo "service_deployed=true" >> "$GITHUB_OUTPUT"
+            res() {
+              aws cloudformation describe-stack-resources --stack-name PaymentService \
+                --query "StackResources[?ResourceType=='$1'].PhysicalResourceId | [0]" --output text
+            }
+            cluster=$(res AWS::ECS::Cluster)
+            service=$(res AWS::ECS::Service)
+            read -r desired task_def < <(aws ecs describe-services --cluster "$cluster" --services "$service" \
+              --query 'services[0].[desiredCount, taskDefinition]' --output text)
+            # Preserve the current mode: an idle (scaled-to-zero) service stays idle.
+            if [ "$desired" -gt 0 ]; then running=true; fi
+            {
+              echo "cluster=$cluster"
+              echo "service=$service"
+              echo "previous_task_def=$task_def"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "service_deployed=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "running=$running" >> "$GITHUB_OUTPUT"
+          echo "Stacks to deploy: ${stacks[*]:-<none>} (running=$running)"
+
       - name: CDK diff (visible in run logs)
-        run: npx cdk diff
+        if: steps.plan.outputs.stacks != ''
+        run: npx cdk diff -c running=${{ steps.plan.outputs.running }} ${{ steps.plan.outputs.stacks }}
         working-directory: infrastructure
         continue-on-error: true
 
+      # --exclusively: never create a dependency stack that isn't already deployed.
       - name: CDK deploy
-        run: npx cdk deploy --all --require-approval never
+        if: steps.plan.outputs.stacks != ''
+        run: |
+          npx cdk deploy --exclusively --require-approval never \
+            -c running=${{ steps.plan.outputs.running }} ${{ steps.plan.outputs.stacks }}
         working-directory: infrastructure
 
-  migrate-db:
-    needs: deploy-infra
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # Migrations follow the expand/contract pattern: schema changes are
-      # backward-compatible with the currently-deployed app version.
-      # See README §"CI/CD" for the full reasoning.
-      - name: Run Flyway via ECS RunTask
-        run: |
-          # TODO: aws ecs run-task with the migration task definition
-          echo "TODO: invoke migration task"
-
-  deploy-app:
-    needs: [publish-image, migrate-db]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Force new deployment
-        run: |
-          aws ecs update-service \
-            --cluster payment-cluster \
-            --service payment-service \
-            --force-new-deployment
-
-      - name: Wait for service to stabilize
-        run: |
-          aws ecs wait services-stable \
-            --cluster payment-cluster \
-            --services payment-service
+      - name: Nothing to deploy
+        if: steps.plan.outputs.stacks == ''
+        run: echo "::notice::No app stacks are deployed; nothing to update. Deploy PaymentNetwork/PaymentService manually to bring the service up."
 
   smoke-test:
-    needs: deploy-app
+    needs: deploy-infra
+    if: needs.deploy-infra.outputs.service-deployed == 'true' && needs.deploy-infra.outputs.running == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -172,12 +143,14 @@ jobs:
             --stack-name PaymentService \
             --query "Stacks[0].Outputs[?OutputKey=='AlbDns'].OutputValue" \
             --output text)
-          echo "dns=$DNS" >> "$GITHUB_OUTPUT"
+          echo "base=http://$DNS" >> "$GITHUB_OUTPUT"
 
       - name: Health check
+        env:
+          BASE: ${{ steps.alb.outputs.base }}
         run: |
           for i in {1..30}; do
-            if curl -fsS "http://${{ steps.alb.outputs.dns }}/actuator/health" > /dev/null; then
+            if curl -fsS "$BASE/actuator/health" > /dev/null; then
               exit 0
             fi
             sleep 5
@@ -185,14 +158,44 @@ jobs:
           echo "health check failed after 30 attempts"
           exit 1
 
+      # Create → confirm → wait for the async pipeline (outbox → SQS → processor) to
+      # reach AUTHORIZED. The stub processor authorizes ~80% by design, so try up to
+      # three intents; all three missing by chance is ~0.8%.
       - name: End-to-end smoke test
+        env:
+          BASE: ${{ steps.alb.outputs.base }}
         run: |
-          # TODO: create payment intent → confirm → assert AUTHORIZED within 30s
-          echo "TODO: implement e2e smoke test"
+          set -euo pipefail
+          post() {
+            curl -fsS -X POST "$BASE$1" \
+              -H "Idempotency-Key: smoke-$(cat /proc/sys/kernel/random/uuid)" \
+              -H "Merchant-Id: smoke-test" \
+              -H "Content-Type: application/json" \
+              -d "$2"
+          }
+          for attempt in 1 2 3; do
+            id=$(post /v1/payment-intents '{"amountMinorUnits":100,"currency":"EUR"}' | jq -r .id)
+            post "/v1/payment-intents/$id/confirm" \
+              '{"paymentMethod":{"token":"tok_visa","type":"CARD"}}' > /dev/null
+            state=PROCESSING
+            for i in {1..30}; do
+              state=$(curl -fsS "$BASE/v1/payment-intents/$id" | jq -r .state)
+              if [ "$state" != PROCESSING ]; then break; fi
+              sleep 1
+            done
+            echo "attempt $attempt: intent $id -> $state"
+            if [ "$state" = AUTHORIZED ]; then exit 0; fi
+          done
+          echo "no intent reached AUTHORIZED in 3 attempts"
+          exit 1
 
+  # A rollout that fails to stabilize is already rolled back by CloudFormation and the
+  # ECS circuit breaker. This handles the remaining case: the service stabilized but
+  # the smoke test failed. CloudFormation still records the new task definition, so
+  # the next successful deploy reconciles it.
   rollback:
-    needs: smoke-test
-    if: failure()
+    needs: [deploy-infra, smoke-test]
+    if: failure() && needs.smoke-test.result == 'failure' && needs.deploy-infra.outputs.previous-task-def != ''
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials
@@ -201,20 +204,15 @@ jobs:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Roll back ECS service to previous task definition
+      - name: Roll back ECS service to the pre-deploy task definition
+        env:
+          CLUSTER: ${{ needs.deploy-infra.outputs.cluster }}
+          SERVICE: ${{ needs.deploy-infra.outputs.service }}
+          TASK_DEF: ${{ needs.deploy-infra.outputs.previous-task-def }}
         run: |
-          # The deployment circuit breaker on the ECS service handles the
-          # in-deploy failure case automatically. This job handles the case
-          # where deploy stabilized but smoke tests still failed.
-          PREVIOUS_TASK_DEF=$(aws ecs describe-services \
-            --cluster payment-cluster \
-            --services payment-service \
-            --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition' \
-            --output text)
-          echo "Currently primary: $PREVIOUS_TASK_DEF"
-          # TODO: identify last-known-good task def and roll back to it
-
-      - name: Notify
-        run: |
-          # TODO: post to SNS / Slack
-          echo "Rollback executed"
+          set -euo pipefail
+          echo "Rolling $SERVICE back to $TASK_DEF"
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$TASK_DEF" > /dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          echo "::error::Smoke test failed; service rolled back to $TASK_DEF"

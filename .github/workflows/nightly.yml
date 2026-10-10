@@ -102,17 +102,3 @@ jobs:
               body: 'Nightly drift detection found differences between the CDK source and the deployed stacks. Investigate.',
               labels: ['drift', 'infrastructure'],
             });
-
-  ecr-cleanup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Keep only the last 10 ECR images
-        run: |
-          # TODO: implement via aws ecr batch-delete-image
-          echo "TODO: prune old ECR images"

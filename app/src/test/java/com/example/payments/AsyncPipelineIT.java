@@ -24,6 +24,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -48,6 +49,10 @@ import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
             "processor.stub.base-latency-ms=10"
         })
 @AutoConfigureMockMvc
+// This is the only context with outbox.queue-url set, so the only one running the
+// OutboxDispatcher. A cached context keeps its @Scheduled pollers alive, which would
+// publish other IT classes' outbox rows out from under them; close it after the class.
+@DirtiesContext
 @EnabledIf("dependenciesReachable")
 class AsyncPipelineIT {
 

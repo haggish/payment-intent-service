@@ -178,7 +178,7 @@ Three GitHub Actions workflows: `pr-checks.yml`, `deploy.yml`, and `nightly.yml`
 
 PR checks run in parallel: app build with unit and integration tests, static analysis (Spotless), CDK type-check, synth, and unit tests. PR feedback target is under 8 minutes. A `cdk diff` PR comment using the read-only OIDC role is scaffolded but disabled — uncomment in `pr-checks.yml` once the role secret is populated.
 
-Deploy on merge to `main` runs sequentially: build app → publish image to ECR → deploy infra (`cdk deploy`) → run Flyway migrations → update ECS service → smoke test against deployed service → automatic rollback on smoke-test failure.
+Deploy on merge to `main` runs sequentially: build and test → `cdk deploy` (which also builds and pushes the image as a CDK Docker asset and rolls the ECS service) → health check and end-to-end smoke test against the ALB → roll back to the pre-deploy task definition if the smoke test fails. Flyway runs on application startup, so the schema migrates as the new tasks come up. The deploy only updates `PaymentNetwork` / `PaymentService` if they already exist, and preserves the service's current running/idle mode — creating or tearing down the service is a deliberate manual step because of cost. `PaymentBootstrap` is never deployed from CI, since it owns the OIDC trust the pipeline itself depends on.
 
 Database migrations follow the **expand/contract** pattern: schema changes are designed to be backward-compatible with the currently-deployed application version, so deploys can roll forward and back without coordination. A column addition deploys as a migration first, then app; a column removal deploys as app first, then migration.
 
@@ -275,7 +275,7 @@ A few specific things worth examining:
 
 Phases 1–9 of `docs/BUILD_ORDER.md` are complete. The domain, application use cases, JDBC persistence, REST adapter with idempotency filter, async pipeline (outbox dispatcher + SQS consumer + reconciliation), CDK stacks, CloudWatch observability, CI/CD workflows, and polish are in place.
 
-A handful of operational TODOs remain in `.github/workflows/deploy.yml` (separate Flyway migration task, smoke test against a live ALB, ECR image cleanup) — these need an actual AWS account to validate, so they're labeled rather than guessed at.
+Old container images accumulate in the CDK asset repository; pruning them is left to `cdk gc` (still an unstable CDK feature) rather than automated.
 
 ## License
 
