@@ -64,3 +64,27 @@ describe('PaymentServiceStack invariants', () => {
     });
   });
 });
+
+// The deploy workflow passes -c running=true|false to preserve the service's current
+// mode; both must synth, and idle must really mean zero tasks.
+describe('PaymentServiceStack running modes', () => {
+  const desiredCount = (running?: string) => {
+    const app = new cdk.App({ context: running === undefined ? {} : { running } });
+    const network = new NetworkStack(app, 'TestNetwork');
+    const stack = new PaymentServiceStack(app, 'TestService', { vpc: network.vpc });
+    const services = Template.fromStack(stack).findResources('AWS::ECS::Service');
+    return Object.values(services).map((s) => s.Properties.DesiredCount);
+  };
+
+  test('defaults to one running task', () => {
+    expect(desiredCount()).toEqual([1]);
+  });
+
+  test('running=true runs one task', () => {
+    expect(desiredCount('true')).toEqual([1]);
+  });
+
+  test('running=false scales the service to zero tasks', () => {
+    expect(desiredCount('false')).toEqual([0]);
+  });
+});

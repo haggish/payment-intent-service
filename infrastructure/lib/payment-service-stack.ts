@@ -92,11 +92,15 @@ export class PaymentServiceStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    const idle = this.node.tryGetContext('running') === 'false';
+
     const fargate = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'Service', {
       cluster,
       cpu: 256,
       memoryLimitMiB: 512,
-      desiredCount: this.node.tryGetContext('running') === 'false' ? 0 : 1,
+      // The pattern rejects desiredCount: 0, so idle mode is applied to the
+      // underlying CfnService below instead.
+      desiredCount: 1,
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       taskImageOptions: {
@@ -124,6 +128,10 @@ export class PaymentServiceStack extends cdk.Stack {
       securityGroups: [appSg],
       assignPublicIp: true, // no NAT; tasks reach AWS APIs via public IPs
     });
+
+    if (idle) {
+      (fargate.service.node.defaultChild as ecs.CfnService).desiredCount = 0;
+    }
 
     eventsQueue.grantSendMessages(fargate.taskDefinition.taskRole);
     eventsQueue.grantConsumeMessages(fargate.taskDefinition.taskRole);

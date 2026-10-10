@@ -40,7 +40,7 @@ npx jest                           # CDK unit tests (structural invariants)
 npx cdk deploy PaymentBootstrap    # one-time per account; sets up GitHub OIDC + roles
 npx cdk deploy PaymentNetwork PaymentService   # day-to-day deploys
 npx cdk deploy -c running=true PaymentService  # demo mode (Fargate task count > 0)
-npx cdk deploy -c running=false PaymentService # idle mode (scale to zero)
+npx cdk deploy -c running=false PaymentService # idle mode (scale to zero; set on the CfnService because the ALB pattern rejects desiredCount 0)
 ```
 
 The integration tests (`JdbcRepositoriesIT`, `PaymentIntentControllerIT`, `AsyncPipelineIT`) are gated with `@EnabledIf` on a TCP probe of localhost:5432 (Postgres) and localhost:4566 (LocalStack). They skip cleanly when those aren't running rather than failing.
@@ -76,7 +76,7 @@ The service is out of PCI scope by design — `PaymentMethod` is a token referen
 
 ## CDK invariants
 
-CDK unit tests (`infrastructure/test/`) treat security/reliability properties as code-reviewable assertions. Current invariants: Aurora `storageEncrypted: true`, every queue has a redrive policy, every SNS topic enforces TLS, ECS deployment circuit breaker enabled, the app log group name `/aws/ecs/payment-service` matches the dashboard's Logs Insights query, and `PaymentBootstrap`'s OIDC roles are trust-scoped (deploy = main only, readonly = any branch in this repo). New constructs should preserve these invariants — failing tests indicate a real regression, not a test to update.
+CDK unit tests (`infrastructure/test/`) treat security/reliability properties as code-reviewable assertions. Current invariants: Aurora `storageEncrypted: true`, every queue has a redrive policy, every SNS topic enforces TLS, ECS deployment circuit breaker enabled, the app log group name `/aws/ecs/payment-service` matches the dashboard's Logs Insights query, `-c running=false` synthesizes an ECS service with `DesiredCount: 0` (and `true`/unset with 1), and `PaymentBootstrap`'s OIDC roles are trust-scoped (deploy = main only, readonly = any branch in this repo). New constructs should preserve these invariants — failing tests indicate a real regression, not a test to update.
 
 Jest is configured in `infrastructure/jest.config.js` with `ts-jest` and a `testPathIgnorePatterns` for `cdk.out/` — without that exclude, jest discovers test files inside Docker asset stagings and tries to run them.
 
@@ -86,7 +86,7 @@ The `DockerImageAsset` for the Fargate image uses the **repo root** as build con
 
 ## CI/CD
 
-Three workflows in `.github/workflows/`: `pr-checks.yml` (parallel: app build+test, Spotless, CDK type-check/synth/jest), `deploy.yml` (sequential on merge to main, with ECS deployment circuit breaker auto-rollback), `nightly.yml`.
+Three workflows in `.github/workflows/`: `pr-checks.yml` (parallel: app build+test, Spotless, CDK type-check/synth/jest), `deploy.yml` (on merge to main: build → `cdk deploy` of only the already-deployed `PaymentNetwork`/`PaymentService`, preserving running/idle mode → smoke test → task-definition rollback on smoke failure; never deploys `PaymentBootstrap`; the image ships as a CDK `DockerImageAsset`, there is no separate ECR repo), `nightly.yml`.
 
 AWS auth from GitHub Actions uses **OIDC federation** (no long-lived keys). Two roles are expected as repo secrets: `DEPLOY_ROLE_ARN` (trusted only from `main`) and `READONLY_ROLE_ARN` (trusted from PR branches for synth/diff). DB migrations follow **expand/contract** so deploys can roll forward and back without coordination — schema changes must be backward-compatible with the currently-deployed app version.
 
