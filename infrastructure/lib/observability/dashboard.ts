@@ -14,6 +14,9 @@ interface DashboardProps {
   loadBalancer: elbv2.ApplicationLoadBalancer;
 }
 
+// Published by the app's CloudWatchMeterRegistry (ObservabilityConfig). Micrometer appends
+// '.count' to counters and '.value' to gauges, so 'payments.created' arrives as
+// 'payments.created.count'. ObservabilityConfigTest pins the exported names.
 const APP_NS = 'Payments/Application';
 
 /**
@@ -44,9 +47,9 @@ export function buildDashboard(scope: Construct, props: DashboardProps): cloudwa
   const successRate = new cloudwatch.MathExpression({
     expression: '(authorized + captured) / IF(confirmed > 0, confirmed, 1) * 100',
     usingMetrics: {
-      authorized: appMetric('payments.authorized'),
-      captured: appMetric('payments.captured'),
-      confirmed: appMetric('payments.confirmed'),
+      authorized: appMetric('payments.authorized.count'),
+      captured: appMetric('payments.captured.count'),
+      confirmed: appMetric('payments.confirmed.count'),
     },
     period: cdk.Duration.minutes(5),
     label: 'Success rate %',
@@ -76,7 +79,7 @@ export function buildDashboard(scope: Construct, props: DashboardProps): cloudwa
     }),
     new cloudwatch.SingleValueWidget({
       title: 'Outbox lag (s)',
-      metrics: [appMetric('outbox.oldest_unpublished_age_seconds', 'Maximum')],
+      metrics: [appMetric('outbox.oldest_unpublished_age_seconds.value', 'Maximum')],
       width: 6,
       height: 4,
     }),
@@ -155,12 +158,12 @@ export function buildDashboard(scope: Construct, props: DashboardProps): cloudwa
       width: 12,
       stacked: false,
       left: [
-        appMetric('payments.created'),
-        appMetric('payments.confirmed'),
-        appMetric('payments.authorized'),
-        appMetric('payments.captured'),
-        appMetric('payments.refunded'),
-        appMetric('payments.failed'),
+        appMetric('payments.created.count'),
+        appMetric('payments.confirmed.count'),
+        appMetric('payments.authorized.count'),
+        appMetric('payments.captured.count'),
+        appMetric('payments.refunded.count'),
+        appMetric('payments.failed.count'),
       ],
     }),
     new cloudwatch.GraphWidget({
@@ -170,9 +173,9 @@ export function buildDashboard(scope: Construct, props: DashboardProps): cloudwa
         new cloudwatch.MathExpression({
           expression: 'auth / IF(auth + decline + fail > 0, auth + decline + fail, 1) * 100',
           usingMetrics: {
-            auth: appMetric('payments.authorized'),
-            decline: appMetric('payments.declined'),
-            fail: appMetric('payments.failed'),
+            auth: appMetric('payments.authorized.count'),
+            decline: appMetric('payments.declined.count'),
+            fail: appMetric('payments.failed.count'),
           },
         }),
       ],
@@ -184,13 +187,13 @@ export function buildDashboard(scope: Construct, props: DashboardProps): cloudwa
     new cloudwatch.GraphWidget({
       title: 'Outbox backlog',
       width: 8,
-      left: [appMetric('outbox.unpublished_count', 'Maximum')],
+      left: [appMetric('outbox.unpublished_count.value', 'Maximum')],
       leftAnnotations: [{ value: 100, label: 'Backlog warning', color: '#ff7f0e' }],
     }),
     new cloudwatch.GraphWidget({
       title: 'Oldest unpublished age (s)',
       width: 8,
-      left: [appMetric('outbox.oldest_unpublished_age_seconds', 'Maximum')],
+      left: [appMetric('outbox.oldest_unpublished_age_seconds.value', 'Maximum')],
       leftAnnotations: [{ value: 60, label: 'SLI threshold', color: '#d62728' }],
     }),
     new cloudwatch.GraphWidget({

@@ -16,6 +16,9 @@ interface AlarmsProps {
   notifyTopic: sns.ITopic;
 }
 
+// Published by the app's CloudWatchMeterRegistry (ObservabilityConfig). Micrometer appends
+// '.count' to counters and '.value' to gauges, so 'payments.created' arrives as
+// 'payments.created.count'. ObservabilityConfigTest pins the exported names.
 const APP_NS = 'Payments/Application';
 
 /**
@@ -44,9 +47,9 @@ export function buildAlarms(scope: Construct, props: AlarmsProps): void {
     metric: new cloudwatch.MathExpression({
       expression: '(authorized + captured) / IF(confirmed > 0, confirmed, 1) * 100',
       usingMetrics: {
-        authorized: appMetric('payments.authorized'),
-        captured: appMetric('payments.captured'),
-        confirmed: appMetric('payments.confirmed'),
+        authorized: appMetric('payments.authorized.count'),
+        captured: appMetric('payments.captured.count'),
+        confirmed: appMetric('payments.confirmed.count'),
       },
     }),
     threshold: 90,
@@ -57,7 +60,7 @@ export function buildAlarms(scope: Construct, props: AlarmsProps): void {
 
   const outboxLagHigh = new cloudwatch.Alarm(scope, 'OutboxLagHigh', {
     alarmName: 'payments-outbox-lag-high',
-    metric: appMetric('outbox.oldest_unpublished_age_seconds', 'Maximum'),
+    metric: appMetric('outbox.oldest_unpublished_age_seconds.value', 'Maximum'),
     threshold: 60,
     comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
     evaluationPeriods: 2,
@@ -107,7 +110,7 @@ export function buildAlarms(scope: Construct, props: AlarmsProps): void {
 
   new cloudwatch.Alarm(scope, 'OutboxBacklog', {
     alarmName: 'payments-outbox-backlog',
-    metric: appMetric('outbox.unpublished_count', 'Maximum'),
+    metric: appMetric('outbox.unpublished_count.value', 'Maximum'),
     threshold: 500,
     evaluationPeriods: 2,
     datapointsToAlarm: 2,
