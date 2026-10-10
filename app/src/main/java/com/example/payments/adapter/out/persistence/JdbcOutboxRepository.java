@@ -2,8 +2,6 @@ package com.example.payments.adapter.out.persistence;
 
 import com.example.payments.domain.model.PaymentIntentEvent;
 import com.example.payments.domain.port.OutboxRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -11,6 +9,8 @@ import java.util.UUID;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Repository
 public class JdbcOutboxRepository implements OutboxRepository {
@@ -99,7 +99,7 @@ public class JdbcOutboxRepository implements OutboxRepository {
     private String serialize(PaymentIntentEvent event) {
         try {
             return objectMapper.writeValueAsString(event);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("failed to serialize event " + event.eventId(), e);
         }
     }

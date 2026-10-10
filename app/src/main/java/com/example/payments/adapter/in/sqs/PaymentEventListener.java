@@ -9,7 +9,6 @@ import com.example.payments.domain.port.PaymentIntentRepository;
 import com.example.payments.domain.port.PaymentProcessor;
 import com.example.payments.domain.port.PaymentProcessor.AuthorizationRequest;
 import com.example.payments.domain.port.ProcessedEventsRepository;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +20,7 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Polling consumer for the FIFO event queue. Each message is handled inside its own DB transaction
