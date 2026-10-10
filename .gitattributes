@@ -1,0 +1,5 @@
+# Shell scripts must keep LF even for checkouts with core.autocrlf=true, or
+# "#!/bin/sh\r" breaks ./gradlew on Linux/macOS and in the Docker build.
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
