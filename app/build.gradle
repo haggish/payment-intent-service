@@ -72,7 +72,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform {
-        includeEngines 'junit-jupiter', 'jqwik'
+        includeEngines 'junit-jupiter', 'jqwik', 'archunit'
     }
     finalizedBy jacocoTestReport
 }
