@@ -30,14 +30,19 @@ jobs:
       # In a real org, this would file an issue on findings rather than fail silently.
       - name: Run dependency check
         run: ./gradlew dependencyCheckAnalyze --no-daemon
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         continue-on-error: true
 
+      # Findings don't fail the job, but a scan that produced no report (misconfigured
+      # plugin, NVD outage) should — otherwise a broken scanner looks like a clean one.
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: dependency-check-report
-          path: app/build/reports/dependency-check-report.html
+          path: app/build/reports/dependency-check/
+          if-no-files-found: error
 
   drift-detect:
     runs-on: ubuntu-latest
