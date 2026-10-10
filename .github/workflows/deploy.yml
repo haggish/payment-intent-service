@@ -44,7 +44,8 @@ jobs:
   deploy-infra:
     needs: build-app
     runs-on: ubuntu-latest
-    environment: production
+    # No `environment:` here: it changes the OIDC subject to `...:environment:production`,
+    # which the deploy role (trusted only for `...:ref:refs/heads/main`) rejects.
     outputs:
       service-deployed: ${{ steps.plan.outputs.service_deployed }}
       running: ${{ steps.plan.outputs.running }}
