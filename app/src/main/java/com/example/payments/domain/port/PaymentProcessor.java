@@ -77,4 +77,15 @@ public interface PaymentProcessor {
 
     /** Status returned by {@link #lookup}. */
     record ProcessorStatus(String state, String processorReference) {}
+
+    /**
+     * The processor definitely did not process the request (e.g. a 5xx before acceptance, or a
+     * refused connection), so the same request may safely be sent again. Adapters must only throw
+     * this when that is certain; anything ambiguous is {@link AuthorizationResult.Unknown}.
+     */
+    class ProcessorUnavailableException extends RuntimeException {
+        public ProcessorUnavailableException(String message) {
+            super(message);
+        }
+    }
 }

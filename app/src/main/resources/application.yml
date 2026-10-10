@@ -57,6 +57,9 @@ processor:
     hang-rate: 0.02
     base-latency-ms: 200
 
+# Applied to the processor by ResilientPaymentProcessor. Only tuning lives here; which outcomes
+# may be retried is fixed in code (only ProcessorUnavailableException — never timeouts, Unknown,
+# or declines).
 resilience4j:
   circuitbreaker:
     instances:
@@ -73,8 +76,15 @@ resilience4j:
       paymentProcessor:
         maxAttempts: 3
         waitDuration: 500ms
+        enableExponentialBackoff: true
         exponentialBackoffMultiplier: 2
   bulkhead:
     instances:
       paymentProcessor:
         maxConcurrentCalls: 25
+  timelimiter:
+    instances:
+      paymentProcessor:
+        # No answer in time => AuthorizationResult.Unknown => reconciliation. Worst case per
+        # message is 3 attempts x 5s + backoff (~17s), inside the 60s SQS visibility timeout.
+        timeoutDuration: 5s

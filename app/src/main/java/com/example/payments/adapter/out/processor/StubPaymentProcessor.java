@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @Profile("!real-processor")
+@Qualifier(ResilientPaymentProcessor.DELEGATE)
 public class StubPaymentProcessor implements PaymentProcessor {
 
     private final StubProcessorProperties props;
@@ -84,12 +86,6 @@ public class StubPaymentProcessor implements PaymentProcessor {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    public static class ProcessorUnavailableException extends RuntimeException {
-        public ProcessorUnavailableException(String message) {
-            super(message);
         }
     }
 
