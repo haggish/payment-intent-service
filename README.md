@@ -170,7 +170,7 @@ Business metrics — like authorization success rate — are emitted from domain
 
 Alarms are split into two SNS topics: paging alarms (system-down conditions, DLQ non-empty, success rate collapse) and notification alarms (capacity warnings, slow responses). One composite alarm captures "the system is meaningfully broken" — multiple conditions simultaneously — and is the only alarm wired to a paging destination.
 
-CloudWatch metric cardinality is deliberately bounded; tag dimensions are limited to currency and merchant for a small number of test merchants. Production usage with high merchant counts would aggregate or sample.
+CloudWatch metric cardinality is deliberately bounded. Only the business meters (`payments.*` counters and `outbox.*` gauges) are exported to the `Payments/Application` namespace, without dimensions — about a dozen custom metrics. JVM, HTTP, and connection-pool meters stay in-process on `/actuator/metrics`; exporting them (for example `http.server.requests` percentiles per URI and status) would multiply the custom-metric bill for no operator benefit, since the ALB and RDS already publish the equivalent signals. Micrometer publishes counters with a `.count` suffix and gauges with `.value`, which is what the dashboard and alarms query. Per-merchant or per-currency dimensions would be the next step at production scale, aggregated or sampled to keep cardinality in check.
 
 ## CI/CD
 

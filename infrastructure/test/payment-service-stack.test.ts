@@ -65,6 +65,39 @@ describe('PaymentServiceStack invariants', () => {
   });
 });
 
+// The app's CloudWatchMeterRegistry publishes counters as '<name>.count' and gauges as
+// '<name>.value' (pinned by ObservabilityConfigTest on the Java side). A dashboard widget or
+// alarm on a bare 'payments.created' would silently show no data forever.
+describe('Application metrics match what the app publishes', () => {
+  const app = new cdk.App();
+  const network = new NetworkStack(app, 'TestNetwork');
+  const stack = new PaymentServiceStack(app, 'TestService', { vpc: network.vpc });
+  const template = Template.fromStack(stack);
+  const APP_NS = 'Payments/Application';
+  const published = /^(payments|outbox)\.[a-z_]+\.(count|value)$/;
+
+  test('alarms read published metric names', () => {
+    const names: string[] = [];
+    for (const alarm of Object.values(template.findResources('AWS::CloudWatch::Alarm'))) {
+      const p = alarm.Properties;
+      if (p.Namespace === APP_NS) names.push(p.MetricName);
+      for (const m of p.Metrics ?? []) {
+        const metric = m.MetricStat?.Metric;
+        if (metric?.Namespace === APP_NS) names.push(metric.MetricName);
+      }
+    }
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(name).toMatch(published);
+  });
+
+  test('dashboard widgets read published metric names', () => {
+    const body = JSON.stringify(template.findResources('AWS::CloudWatch::Dashboard'));
+    const names = [...body.matchAll(/Payments\/Application\\+",\\+"([^"\\]+)/g)].map((m) => m[1]);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(name).toMatch(published);
+  });
+});
+
 // The deploy workflow passes -c running=true|false to preserve the service's current
 // mode; both must synth, and idle must really mean zero tasks.
 describe('PaymentServiceStack running modes', () => {
