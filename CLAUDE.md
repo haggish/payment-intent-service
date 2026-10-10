@@ -12,7 +12,7 @@ When adding code, fit into the existing hexagonal package layout rather than cre
 
 Two top-level builds:
 
-- `app/` — Spring Boot 3 / Java 21 service, built with Gradle (`settings.gradle` includes only `app`).
+- `app/` — Spring Boot 4 / Java 21 service (Jackson 3 — `tools.jackson.*`), built with Gradle 9 (`settings.gradle` includes only `app`).
 - `infrastructure/` — AWS CDK in TypeScript, separate npm project. Three stacks: `PaymentBootstrap` (one-time: GitHub Actions OIDC provider + deploy/readonly IAM roles), `NetworkStack` (stable: VPC only), `PaymentServiceStack` (per-deploy: SGs, Aurora, Fargate, SQS, observability).
 
 The split is intentional — keep network resources stable and put per-deploy resources in `PaymentServiceStack`. Security groups live in `PaymentServiceStack` rather than `NetworkStack` so SG-to-SG rules (ALB → app, app → DB) stay intra-stack; otherwise the auto-wired ALB→app ingress would form a dependency cycle with the network stack. `PaymentBootstrap` is deployed once per AWS account; copy its `DeployRoleArn` and `ReadonlyRoleArn` outputs into the repo's `DEPLOY_ROLE_ARN` and `READONLY_ROLE_ARN` GitHub secrets.
@@ -45,7 +45,9 @@ npx cdk deploy -c running=false PaymentService # idle mode (scale to zero; set o
 
 The integration tests (`JdbcRepositoriesIT`, `PaymentIntentControllerIT`, `AsyncPipelineIT`) are gated with `@EnabledIf` on a TCP probe of localhost:5432 (Postgres) and localhost:4566 (LocalStack). They skip cleanly when those aren't running rather than failing.
 
-The test suite registers both JUnit Jupiter and **jqwik** engines (see `app/build.gradle`); property-based tests in the domain layer rely on jqwik being included.
+The test task includes three engines explicitly (see `app/build.gradle`): JUnit Jupiter, **jqwik** (property-based tests in the domain layer), and **archunit** (`@ArchTest` rules). Any engine missing from `includeEngines` is silently skipped — the ArchUnit rules did not run until the archunit engine was added.
+
+`OutboxEventWireFormatTest` pins the JSON of every outbox event against `src/test/resources/wire/payment-intent-events.jsonl`. A failure means old and new versions couldn't exchange events mid-deploy — roll the change out expand/contract instead of regenerating the fixture.
 
 ## Architecture
 
