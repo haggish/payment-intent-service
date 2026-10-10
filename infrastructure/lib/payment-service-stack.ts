@@ -41,7 +41,10 @@ export class PaymentServiceStack extends cdk.Stack {
     // ---------- Database ----------
     const dbCluster = new rds.DatabaseCluster(this, 'Aurora', {
       engine: rds.DatabaseClusterEngine.auroraPostgres({
-        version: rds.AuroraPostgresEngineVersion.VER_16_4,
+        // AWS retires Aurora minor versions; creating a cluster on a retired one fails with
+        // "Cannot find version". Check `aws rds describe-db-engine-versions --engine
+        // aurora-postgresql` when bumping. Major stays 16 to match compose and CI Postgres.
+        version: rds.AuroraPostgresEngineVersion.VER_16_13,
       }),
       writer: rds.ClusterInstance.serverlessV2('Writer', {
         publiclyAccessible: false,
