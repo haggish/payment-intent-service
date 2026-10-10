@@ -37,6 +37,7 @@ cdk.out/
 cdk.staging/
 cdk.context.json
 *.js
+!infrastructure/jest.config.js
 *.js.map
 *.d.ts
 *.tsbuildinfo

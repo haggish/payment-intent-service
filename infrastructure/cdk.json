@@ -33,6 +33,7 @@
     "@aws-cdk/aws-iam:standardizedServicePrincipals": true,
     "@aws-cdk/aws-ecs:disableExplicitDeploymentControllerForCircuitBreaker": true,
     "@aws-cdk/aws-rds:databaseProxyUniqueResourceName": true,
-    "@aws-cdk/core:newStyleStackSynthesis": true
+    "@aws-cdk/core:newStyleStackSynthesis": true,
+    "@aws-cdk/core:defaultCrossStackReferences": "strong"
   }
 }

@@ -21,14 +21,14 @@ jobs:
     outputs:
       image-tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Build & test
         run: ./gradlew build --no-daemon
@@ -38,7 +38,7 @@ jobs:
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Upload jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-jar
           path: app/build/libs/*.jar
@@ -49,15 +49,15 @@ jobs:
     outputs:
       image-uri: ${{ steps.push.outputs.uri }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: app-jar
           path: app/build/libs
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -83,16 +83,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: infrastructure/package-lock.json
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -102,7 +102,7 @@ jobs:
         working-directory: infrastructure
 
       - name: CDK diff (visible in run logs)
-        run: npx cdk diff --all
+        run: npx cdk diff
         working-directory: infrastructure
         continue-on-error: true
 
@@ -114,10 +114,10 @@ jobs:
     needs: deploy-infra
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -135,7 +135,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -157,10 +157,10 @@ jobs:
     needs: deploy-app
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -196,7 +196,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
